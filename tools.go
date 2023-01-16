@@ -22,6 +22,8 @@ import (
 	"encoding/base32"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"github.com/denisbrodbeck/machineid"
 	"github.com/ghodss/yaml"
 	"io"
 	"io/ioutil"
@@ -32,6 +34,12 @@ import (
 	"strconv"
 	"strings"
 )
+
+func GetMachineID(app string) string {
+	id, _ := machineid.ProtectedID(app)
+	klog.Infof("generate app: %s machine id: %s", app, id)
+	return id
+}
 
 func GetAllFiles(dirPath string) (dirs []string, files []string, err error) {
 	fs, err := ioutil.ReadDir(dirPath)
@@ -323,4 +331,19 @@ func IntInArray(key int, arrays []int) (exist bool) {
 		}
 	}
 	return
+}
+
+func GetRandomString(n int) string {
+	randBytes := make([]byte, n/2)
+	rand.Read(randBytes)
+	return fmt.Sprintf("%x", randBytes)
+}
+func URL(front, behind string) (url string) {
+	if !strings.HasSuffix(front, "/") {
+		front += "/"
+	}
+	if strings.HasPrefix(behind, "/") {
+		behind = behind[1:]
+	}
+	return front + behind
 }
