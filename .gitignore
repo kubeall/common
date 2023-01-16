@@ -1,0 +1,9 @@
+_output
+vendor
+.idea
+.vscode
+.DS_Store
+build
+*.json
+**/public.pem
+*.db
