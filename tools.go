@@ -22,11 +22,11 @@ import (
 	"encoding/base32"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/denisbrodbeck/machineid"
 	"github.com/ghodss/yaml"
+	"golang.org/x/crypto/bcrypt"
 	"io"
-	"io/ioutil"
 	"k8s.io/klog/v2"
 	"os"
 	"path"
@@ -35,14 +35,8 @@ import (
 	"strings"
 )
 
-func GetMachineID(app string) string {
-	id, _ := machineid.ProtectedID(app)
-	klog.Infof("generate app: %s machine id: %s", app, id)
-	return id
-}
-
 func GetAllFiles(dirPath string) (dirs []string, files []string, err error) {
-	fs, err := ioutil.ReadDir(dirPath)
+	fs, err := os.ReadDir(dirPath)
 	if err != nil {
 		return
 	}
@@ -64,7 +58,7 @@ func GetAllFiles(dirPath string) (dirs []string, files []string, err error) {
 func GetModuleFiles(dirPath string) (dirs []string, modules map[string][]string, err error) {
 	modules = make(map[string][]string)
 	modules[""] = []string{}
-	fs, err := ioutil.ReadDir(dirPath)
+	fs, err := os.ReadDir(dirPath)
 	if err != nil {
 		return
 	}
@@ -87,7 +81,7 @@ func GetModuleFiles(dirPath string) (dirs []string, modules map[string][]string,
 
 func LoadConfig(path string, object interface{}) {
 	if strings.HasSuffix(path, ".yaml") || strings.HasSuffix(path, ".yml") {
-		if data, err := ioutil.ReadFile(path); err == nil {
+		if data, err := os.ReadFile(path); err == nil {
 			if jsonData, err := yaml.YAMLToJSON(data); err != nil {
 				klog.Fatalf("Unable to decode application %s yaml config from file, err: %s", path, err)
 			} else {
@@ -100,7 +94,7 @@ func LoadConfig(path string, object interface{}) {
 
 		}
 	} else if strings.HasSuffix(path, ".json") {
-		if data, err := ioutil.ReadFile(path); err == nil {
+		if data, err := os.ReadFile(path); err == nil {
 			if err = json.Unmarshal(data, object); err != nil {
 				klog.Fatalf("Unable to decode application %s json config from file, err: %s", path, err)
 			}
@@ -112,17 +106,38 @@ func LoadConfig(path string, object interface{}) {
 		klog.Fatalf("Unable to read application  config from file: %s", path)
 	}
 }
-
+func MD5VByte(bytes []byte) string {
+	h := md5.New()
+	h.Write(bytes)
+	return hex.EncodeToString(h.Sum(nil))
+}
 func MD5V(str string) string {
 	h := md5.New()
 	h.Write([]byte(str))
 	return hex.EncodeToString(h.Sum(nil))
 }
-func KeyInArray(key string, arrays []string) (exist bool) {
+func StringKeyInArray(key string, arrays []string) (exist bool) {
 	for _, v := range arrays {
 		if key == v {
 			exist = true
 			return
+		}
+	}
+	return
+}
+func UintKeyInArray(key uint, arrays []uint) (exist bool) {
+	for _, v := range arrays {
+		if key == v {
+			exist = true
+			return
+		}
+	}
+	return
+}
+func DeleteKeyFromArray(key string, arrays []string) (results []string) {
+	for _, v := range arrays {
+		if key != v {
+			results = append(results, v)
 		}
 	}
 	return
@@ -155,10 +170,10 @@ func Snake2CamelString(s string) string {
 	num := len(s) - 1
 	for i := 0; i <= num; i++ {
 		d := s[i]
-		if k == false && d >= 'A' && d <= 'Z' {
+		if !k && d >= 'A' && d <= 'Z' {
 			k = true
 		}
-		if d >= 'a' && d <= 'z' && (j || k == false) {
+		if d >= 'a' && d <= 'z' && (j || !k) {
 			d = d - 32
 			j = false
 			k = true
@@ -175,12 +190,17 @@ func Snake2CamelString(s string) string {
 func CamelString2Snake(s string) string {
 	data := make([]byte, 0, len(s)*2)
 	j := false
+	first := true
 	num := len(s)
 	for i := 0; i < num; i++ {
 		d := s[i]
 		if i > 0 && d >= 'A' && d <= 'Z' && j {
-			data = append(data, '_')
-
+			if first {
+				data = append(data, '_')
+				first = false
+			}
+		} else {
+			first = true
 		}
 		if d != '_' {
 			j = true
@@ -205,7 +225,6 @@ func StringsToUints(strings []string) (ints []uint) {
 func GetStructFieldsType(v interface{}) (fields map[string]string) {
 	fields = make(map[string]string)
 	dataType := reflect.TypeOf(v)
-	dataValue := reflect.ValueOf(v)
 	if dataType.Kind() == reflect.Ptr {
 		originType := reflect.ValueOf(v).Elem().Type()
 		if originType.Kind() != reflect.Struct {
@@ -213,7 +232,6 @@ func GetStructFieldsType(v interface{}) (fields map[string]string) {
 		}
 		// 解引用
 		dataType = dataType.Elem()
-		dataValue = dataValue.Elem()
 		num := dataType.NumField()
 		for i := 0; i < num; i++ {
 			name := strings.SplitN(dataType.Field(i).Tag.Get("json"), ",", 2)[0]
@@ -231,9 +249,6 @@ func GetStructFieldsType(v interface{}) (fields map[string]string) {
 //
 // TODO(ericchiang): refactor ID creation onto the storage.
 var encoding = base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567")
-
-// Valid characters for user codes
-const validUserCharacters = "BCDFGHJKLMNPQRSTVWXZ"
 
 // NewDeviceCode returns a 32 char alphanumeric cryptographically secure string
 func NewDeviceCode() string {
@@ -264,9 +279,6 @@ func StringToInt(str string) int {
 	if in, err := strconv.Atoi(str); err != nil {
 		return 0
 	} else {
-		if in < 1 {
-			in = 1
-		}
 		return in
 	}
 }
@@ -293,10 +305,7 @@ func StringToFloat64(str string) float64 {
 func PathExists(path string) bool {
 	_, err := os.Stat(path) //os.Stat获取文件信息
 	if err != nil {
-		if os.IsExist(err) {
-			return true
-		}
-		return false
+		return os.IsExist(err)
 	}
 	return true
 }
@@ -335,15 +344,50 @@ func IntInArray(key int, arrays []int) (exist bool) {
 
 func GetRandomString(n int) string {
 	randBytes := make([]byte, n/2)
-	rand.Read(randBytes)
+	_, _ = rand.Read(randBytes)
 	return fmt.Sprintf("%x", randBytes)
 }
 func URL(front, behind string) (url string) {
 	if !strings.HasSuffix(front, "/") {
 		front += "/"
 	}
-	if strings.HasPrefix(behind, "/") {
-		behind = behind[1:]
-	}
+	behind = strings.TrimPrefix(behind, "/")
 	return front + behind
+}
+
+func GetStructJsonFields(v interface{}) (fields map[string]interface{}) {
+	fields = make(map[string]interface{})
+	t := reflect.TypeOf(v)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return
+	}
+	fieldNum := t.NumField()
+	for i := 0; i < fieldNum; i++ {
+		name := strings.SplitN(t.Field(i).Tag.Get("json"), ",", 2)[0]
+		if name == "-" {
+			continue
+		}
+		fields[name] = t.Field(i).Name
+	}
+	return fields
+}
+
+func GeneratePassword(password, salt string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password+salt), bcrypt.DefaultCost) //加密处理
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
+
+}
+func ComparePassword(passwordHash string, password, salt string) error {
+	err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password+salt))
+	if err != nil {
+		err = errors.New("username or password is not right")
+	}
+	return err
+
 }

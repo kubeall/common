@@ -23,24 +23,29 @@ import (
 	"fmt"
 )
 
-type ArrayString []string
+type ClusterAuthConfig struct {
+	Token    string `json:"token" description:"集群Token"`
+	CertData string `json:"certData" description:"集群用户Cert"`
+	KeyData  string `json:"keyData" description:"集群用户Key"`
+	CaData   string `json:"caData" description:"集群CA证书"`
+}
 
-func (ArrayString) GormDataType() string {
+func (ClusterAuthConfig) GormDataType() string {
 	return "json"
 }
 
-//Scan 实现 sql.Scanner 接口，Scan 将 value 扫描至 Jsonb
-func (ar *ArrayString) Scan(value interface{}) error {
+// Scan 实现 sql.Scanner 接口，Scan 将 value 扫描至 Jsonb
+func (ins *ClusterAuthConfig) Scan(value interface{}) error {
 	byteValue, ok := value.([]byte)
 	if !ok {
-		return errors.New(fmt.Sprint("Failed to unmarshal ArrayString value: ", value))
+		return errors.New(fmt.Sprint("Failed to unmarshal OpenIDConfiguration value: ", value))
 	}
-	err := json.Unmarshal(byteValue, ar)
+	err := json.Unmarshal(byteValue, ins)
 	return err
 }
 
-//Value 实现 driver.Valuer 接口，Value 返回 json value
-func (ar ArrayString) Value() (driver.Value, error) {
-	re, err := json.Marshal(ar)
+// Value 实现 driver.Valuer 接口，Value 返回 json value
+func (ins ClusterAuthConfig) Value() (driver.Value, error) {
+	re, err := json.Marshal(ins)
 	return re, err
 }

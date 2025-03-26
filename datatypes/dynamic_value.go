@@ -23,24 +23,29 @@ import (
 	"fmt"
 )
 
-type ArrayUint []uint
+type DynamicValue struct {
+	String  string  `json:"string" description:""`
+	Byte    []byte  `json:"byte" description:""`
+	Int64   int64   `json:"int64" description:""`
+	Float64 float64 `json:"float64" description:""`
+}
 
-func (ArrayUint) GormDataType() string {
+func (DynamicValue) GormDataType() string {
 	return "json"
 }
 
-//Scan 实现 sql.Scanner 接口，Scan 将 value 扫描至 Jsonb
-func (ar *ArrayUint) Scan(value interface{}) error {
+// Scan 实现 sql.Scanner 接口，Scan 将 value 扫描至 Jsonb
+func (ins *DynamicValue) Scan(value interface{}) error {
 	byteValue, ok := value.([]byte)
 	if !ok {
-		return errors.New(fmt.Sprint("Failed to unmarshal ArrayUint value: ", value))
+		return errors.New(fmt.Sprint("Failed to unmarshal DynamicValue value: ", value))
 	}
-	err := json.Unmarshal(byteValue, ar)
+	err := json.Unmarshal(byteValue, ins)
 	return err
 }
 
-//Value 实现 driver.Valuer 接口，Value 返回 json value
-func (ar ArrayUint) Value() (driver.Value, error) {
-	re, err := json.Marshal(ar)
+// Value 实现 driver.Valuer 接口，Value 返回 json value
+func (ins DynamicValue) Value() (driver.Value, error) {
+	re, err := json.Marshal(ins)
 	return re, err
 }
